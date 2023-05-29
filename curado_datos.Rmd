@@ -1,0 +1,692 @@
+---
+title: "Manejo de datos del IMN para análisis agroclimáticos y calculo de la duración de los días"
+output: html_notebook
+---
+
+### author: 
+### - "Luis Arturo Arrieta " con apoyo de OpenAI. (2023)
+
+##### Las bases del dato del IMN tiene una estructura desordenada y difícil de manejar en excel, R o cualquier otro software este script birnda un ejemplo de como curarlos.
+
+##### Cargar las base de datos
+
+# Base de datos de Estación Juan Santa María
+##### Radiación
+```{r}
+library(readxl)
+radiación_santamaria <- read_excel("radiación.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+##### Precipitación
+```{r}
+precipitacion_santamaria <- read_excel("precipitación.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+
+##### humedad
+
+```{r}
+humedad_santamaria <- read_excel("humedad.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+##### temperatura media
+
+```{r}
+temperaturamed_santamaria <- read_excel("temperatura_media.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+##### temperatura Minima
+
+```{r}
+temperatura_minima <- read_excel("temperatura_minima.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+
+##### velocidad del viento
+
+```{r}
+veloc_viento_santamaria <- read_excel("velocidad_del_viento.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+##### Direción del viento
+
+```{r}
+direc_viento_santamaria <- read_excel("dirección_del_viento.xlsx", 
+    sheet = "JUAN_SANTAMARIA")
+```
+
+
+
+#### Generar data frame
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidyr)
+Metdata <- gather(radiación_santamaria, key = "day", value = "RAD_MEA", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, RAD_MEA)
+
+```
+
+#### Agregar la precipitación al data frame
+
+```{r}
+precipitacion_santamaria %>%
+  gather(key = "day", value = "PP", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, PP) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la humedad al data frame
+
+```{r}
+humedad_santamaria %>%
+  gather(key = "day", value = "HR", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, HR) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la temperatura media al data frame
+
+```{r}
+temperaturamed_santamaria %>%
+  gather(key = "day", value = "TM", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TM) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+#### Agregar la temperatura minima al data frame
+
+```{r}
+temperatura_minima %>%
+  gather(key = "day", value = "TN", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TN) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la velocidad del viento al data frame
+
+```{r}
+veloc_viento_santamaria %>%
+  gather(key = "day", value = "VV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, VV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+#### Agregar la direción del viento al data frame
+
+```{r}
+direc_viento_santamaria %>%
+  gather(key = "day", value = "DV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, DV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+#### Eliminar filas donde estas columnas tengan NA
+```{r}
+Metdata <- subset(Metdata, !rowSums(is.na(Metdata[c("TN", "DV", "VV", "TM", "HR", "PP", "RAD_MEA")])) == length(c("TN", "DV", "VV", "TM", "HR", "PP", "RAD_MEA")))
+
+```
+
+```{r}
+
+# Eliminar las filas duplicadas basadas en la columna Date
+Metdata <- distinct(Metdata, Date, .keep_all = TRUE)
+
+```
+
+#### Calcular nueva variable llamda SUNSHINE
+```{r}
+library(suncalc)
+library(dplyr)
+
+lat <- 9.9905556
+lon <- -84.21444444444445
+
+# Define a function to calculate the sunshine duration in hours for a given date
+calc_sunshine_duration <- function(Date) {
+  # Calculate the sunrise and sunset times for the given date and coordinates
+  sun_times <- getSunlightTimes(Date, lat, lon)
+  # Calculate the duration of daylight in hours
+  daylight_duration_hours <- difftime(sun_times$sunset, sun_times$sunrise, units = "hours")
+  # Return the daylight duration in hours
+  return(daylight_duration_hours)
+}
+
+# Add a new column to the data frame with the sunshine duration in hours for each date
+Metdata <- Metdata %>% 
+  mutate(SUNSHINE = sapply(Date, calc_sunshine_duration))
+
+
+```
+
+
+
+```{r}
+write.csv(Metdata, file = "metdata_Santamaria.csv", row.names = FALSE)
+
+```
+
+
+
+
+############FAVOR LIMPIAR EL ENVIROMENT###############################
+##################################################################################################################################################################################################################
+
+# Base de datos de Estación SANTA BARBARA
+##### Radiación
+```{r}
+library(readxl)
+radiación_santabarbara <- read_excel("radiación.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+##### Precipitación
+```{r}
+precipitacion_santabarbara <- read_excel("precipitación.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+
+##### humedad
+
+```{r}
+humedad_santabarbara <- read_excel("humedad.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+##### temperatura media
+
+```{r}
+temperaturamed_santabarbara <- read_excel("temperatura_media.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+##### temperatura Minima
+
+```{r}
+temperatura_minima_santabarbara <- read_excel("temperatura_minima.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+
+##### velocidad del viento
+
+```{r}
+veloc_viento_santabarbara <- read_excel("velocidad_del_viento.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+##### Direción del viento
+
+```{r}
+direc_viento_santabarbara <- read_excel("dirección_del_viento.xlsx", 
+    sheet = "SANTA_BARBARA")
+```
+
+
+
+#### Generar data frame
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidyr)
+Metdata <- gather(radiación_santabarbara, key = "day", value = "RAD_MEA", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, RAD_MEA)
+
+```
+
+#### Agregar la precipitación al data frame
+
+```{r}
+precipitacion_santabarbara %>%
+  gather(key = "day", value = "PP", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, PP) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la humedad al data frame
+
+```{r}
+humedad_santabarbara %>%
+  gather(key = "day", value = "HR", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, HR) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la temperatura media al data frame
+
+```{r}
+temperaturamed_santabarbara %>%
+  gather(key = "day", value = "TM", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TM) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+#### Agregar la temperatura minima al data frame
+
+```{r}
+temperatura_minima_santabarbara %>%
+  gather(key = "day", value = "TN", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TN) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la velocidad del viento al data frame
+
+```{r}
+veloc_viento_santabarbara %>%
+  gather(key = "day", value = "VV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, VV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la direción del viento al data frame
+
+```{r}
+direc_viento_santabarbara %>%
+  gather(key = "day", value = "DV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, DV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+
+```{r}
+Metdata <- subset(Metdata, !rowSums(is.na(Metdata[c("TN", "DV", "VV", "TM", "HR", "PP", "RAD_MEA")])) == length(c("TN", "DV", "VV", "TM", "HR", "PP", "RAD_MEA")))
+
+```
+
+```{r}
+
+# Eliminar las filas duplicadas basadas en la columna Date
+Metdata <- distinct(Metdata, Date, .keep_all = TRUE)
+
+```
+
+#### Calcular nueva variable llamda SUNSHINE
+```{r}
+library(suncalc)
+library(dplyr)
+
+lat <- 10.0333333 #Coordenadas de Santa Barbara
+lon <- -84.16583333333334 #
+
+# Define a function to calculate the sunshine duration in hours for a given date
+calc_sunshine_duration <- function(Date) {
+  # Calculate the sunrise and sunset times for the given date and coordinates
+  sun_times <- getSunlightTimes(Date, lat, lon)
+  # Calculate the duration of daylight in hours
+  daylight_duration_hours <- difftime(sun_times$sunset, sun_times$sunrise, units = "hours")
+  # Return the daylight duration in hours
+  return(daylight_duration_hours)
+}
+
+# Add a new column to the data frame with the sunshine duration in hours for each date
+Metdata <- Metdata %>% 
+  mutate(SUNSHINE = sapply(Date, calc_sunshine_duration))
+
+
+```
+
+
+```{r}
+write.csv(Metdata, file = "metdata_santabarbara.csv", row.names = FALSE)
+
+```
+
+############FAVOR LIMPIAR EL ENVIROMENT###############################
+##################################################################################################################################################################################################################
+
+# Base de datos de Estación NARANJO
+
+##### Precipitación
+```{r}
+precipitacion_naranjo  <- read_excel("precipitación.xlsx", 
+    sheet = "NARANJO")
+```
+
+
+##### humedad
+
+```{r}
+humedad_naranjo  <- read_excel("humedad.xlsx", 
+    sheet = "NARANJO")
+```
+
+##### temperatura media
+
+```{r}
+temperaturamed_naranjo  <- read_excel("temperatura_media.xlsx", 
+    sheet = "NARANJO")
+```
+
+##### temperatura Minima
+
+```{r}
+temperatura_minima_naranjo <- read_excel("temperatura_minima.xlsx", 
+    sheet = "NARANJO")
+```
+
+
+##### velocidad del viento
+
+```{r}
+veloc_viento_naranjo <- read_excel("velocidad_del_viento.xlsx", 
+    sheet = "NARANJO")
+```
+
+##### Direción del viento
+
+```{r}
+direc_viento_naranjo <- read_excel("dirección_del_viento.xlsx", 
+    sheet = "NARANJO")
+```
+
+
+
+#### Generar data frame
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidyr)
+Metdata <- gather(precipitacion_naranjo, key = "day", value = "PP", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, PP)
+
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la humedad al data frame
+
+```{r}
+humedad_naranjo %>%
+  gather(key = "day", value = "HR", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, HR) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la temperatura media al data frame
+
+```{r}
+temperaturamed_naranjo %>%
+  gather(key = "day", value = "TM", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TM) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+#### Agregar la temperatura minima al data frame
+
+```{r}
+temperatura_minima_naranjo %>%
+  gather(key = "day", value = "TN", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, TN) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la velocidad del viento al data frame
+
+```{r}
+veloc_viento_naranjo %>%
+  gather(key = "day", value = "VV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, VV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+#### Agregar la direción del viento al data frame
+
+```{r}
+direc_viento_naranjo %>%
+  gather(key = "day", value = "DV", D1:D31) %>%
+  mutate(Date = as.Date(gsub("D", "", paste(year, month, day, sep = "-")), "%Y-%m-%d")) %>%
+  select(Date, DV) %>%
+  left_join(Metdata, by = "Date") -> Metdata
+```
+
+#### Limpiar data frame
+
+```{r}
+Metdata <- Metdata[complete.cases(Metdata$Date), ]
+
+```
+
+
+
+```{r}
+Metdata <- subset(Metdata, !rowSums(is.na(Metdata[c("TN", "DV", "VV", "TM", "HR", "PP")])) == length(c("TN", "DV", "VV", "TM", "HR", "PP")))
+
+```
+
+
+
+
+```{r}
+
+# Eliminar las filas duplicadas basadas en la columna Date
+Metdata <- distinct(Metdata, Date, .keep_all = TRUE)
+
+```
+
+#### Calcular nueva variable llamda SUNSHINE
+```{r}
+library(suncalc)
+library(dplyr)
+
+lat <- 10.0713889 #Coordenadas de Naranjo
+lon <- -84.39944444444446 #
+
+# Define a function to calculate the sunshine duration in hours for a given date
+calc_sunshine_duration <- function(Date) {
+  # Calculate the sunrise and sunset times for the given date and coordinates
+  sun_times <- getSunlightTimes(Date, lat, lon)
+  # Calculate the duration of daylight in hours
+  daylight_duration_hours <- difftime(sun_times$sunset, sun_times$sunrise, units = "hours")
+  # Return the daylight duration in hours
+  return(daylight_duration_hours)
+}
+
+# Add a new column to the data frame with the sunshine duration in hours for each date
+Metdata <- Metdata %>% 
+  mutate(SUNSHINE = sapply(Date, calc_sunshine_duration))
+
+
+```
+
+
+
+```{r}
+write.csv(Metdata, file = "metdata_naranjitobello.csv", row.names = FALSE)
+
+```
+
+
+##################################################################################################################################################################################################################
+
+
+```{r}
+library(readr)
+metdata_naranjitobello <- read_csv("metdata_naranjitobello.csv")
+metdata_santabarbara <- read_csv("metdata_santabarbara.csv")
+metdata_Santamaria <- read_csv("metdata_Santamaria.csv")
+```
+
+# Adaptar diferentes data frame para poder juntarlos:
+
+
+```{r}
+library(dplyr)
+
+# Agregar columnas RAD_MED con valores NA al data frame metdata para Naranjo
+
+
+metdata_naranjitobello <- metdata_naranjitobello %>% 
+  mutate(RAD_MEA = NA )
+```
+
+# Crear nuevo data frame llamado valle central intermontano
+
+```{r}
+library(dplyr)
+ valle_intermontano_central <- rbind(metdata_Santamaria, metdata_santabarbara, metdata_naranjitobello)
+# Agregar columna extra "Nombre_Base" al data frame "valle_intermontano_central"
+valle_intermontano_central$Nombre_Base <- c(rep("metdata_Santamaria", nrow(metdata_Santamaria)),
+                                             rep("metdata_santabarbara", nrow(metdata_santabarbara)),
+                                             rep("metdata_naranjitobello", nrow(metdata_naranjitobello)))
+
+```
+
+#Guardar el nuevo data frame 
+
+```{r}
+# Guardar data frame como archivo CSV
+write.csv(valle_intermontano_central, file = "valle_intermontano_central.csv", row.names = FALSE)
+
+```
+
+
